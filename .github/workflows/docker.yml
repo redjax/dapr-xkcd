@@ -2,9 +2,13 @@
 name: Build API Container
 
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types:
+      - opened
+      - synchronize
+      - reopened
     paths:
       - ".containers/Dockerfile"
       - ".dockerignore"
@@ -14,12 +18,12 @@ on:
       - "internal/**"
       - ".github/workflows/docker.yml"
 
-      # Documentation and tests do not change the runtime binary.
+      # Documentation and test-only changes do not affect the image.
       # Exclusions must follow the positive patterns.
       - "!**/*.md"
       - "!**/*_test.go"
 
-  pull_request:
+  push:
     branches:
       - main
     paths:
@@ -58,29 +62,18 @@ jobs:
         shell: bash
         env:
           IMAGE: ghcr.io/redjax/dapr-xkcd
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
 
           publish=false
           tags=("${IMAGE}:sha-${GITHUB_SHA}")
 
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            if [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
-              publish=true
-              tags+=("${IMAGE}:latest")
-
-            elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-              version="${GITHUB_REF#refs/tags/}"
-
-              if [[ ! "${version}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-                printf 'Invalid Docker image tag: %s\n' "${version}" >&2
-                exit 1
-              fi
-
-              publish=true
-              tags+=("${IMAGE}:${version}")
-            fi
+          # Only main-branch push events may publish.
+          # PRs and manual runs always build without publishing.
+          if [[ "${GITHUB_EVENT_NAME}" == "push" \
+             && "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            publish=true
+            tags+=("${IMAGE}:latest")
           fi
 
           {
@@ -113,4 +106,14 @@ jobs:
 
       labels: |
         org.opencontainers.image.title=dapr-xkcd
-        org.opencontainers.image.description=Self-hosted XKCD
+        org.opencontainers.image.description=Self-hosted XKCD archive and viewer
+        org.opencontainers.image.source=https://github.com/redjax/dapr-xkcd
+        org.opencontainers.image.revision=${{ github.sha }}
+
+      pull: true
+
+      cache-from: type=gha,scope=dapr-xkcd-api
+      cache-to: type=gha,mode=max,scope=dapr-xkcd-api
+
+      publish: ${{ needs.prepare.outputs.publish == 'true' }}
+      registry: ghcr.io
