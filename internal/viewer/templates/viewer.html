@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>
+        {{if .HasComic}}
+        #{{.Comic.Num}} — {{.Comic.Title}} | XKCD Archive
+        {{else}}
+        XKCD Archive
+        {{end}}
+    </title>
+
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: system-ui, sans-serif;
+            background: #111827;
+            color: #e5e7eb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        a {
+            color: #93c5fd;
+        }
+
+        header,
+        footer,
+        .heading,
+        .navigation,
+        .details {
+            text-align: center;
+        }
+
+        header {
+            margin-bottom: 28px;
+        }
+
+        header h1 {
+            margin-bottom: 8px;
+        }
+
+        header h1 a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .muted {
+            color: #9ca3af;
+        }
+
+        .heading h2 {
+            margin-bottom: 8px;
+        }
+
+        .navigation {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin: 24px 0;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 10px 16px;
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+            background: #1f2937;
+            color: #e5e7eb;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        a.button:hover {
+            background: #374151;
+        }
+
+        a.button:focus-visible,
+        a:focus-visible {
+            outline: 3px solid #93c5fd;
+            outline-offset: 3px;
+        }
+
+        .button.disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+
+        figure {
+            margin: 0;
+        }
+
+        .image-frame {
+            display: flex;
+            justify-content: center;
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            overflow: hidden;
+        }
+
+        .comic-image {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            align-self: flex-start;
+        }
+
+        figcaption {
+            max-width: 850px;
+            margin: 20px auto;
+            padding: 16px;
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+        }
+
+        .details {
+            margin: 24px 0;
+        }
+
+        .message {
+            max-width: 700px;
+            margin: 48px auto;
+            padding: 24px;
+            text-align: center;
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+        }
+
+        footer {
+            margin-top: 32px;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 12px;
+            }
+
+            .button {
+                padding: 9px 12px;
+            }
+
+            .image-frame {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1><a href="/comics">XKCD Archive</a></h1>
+        <p>
+            <a href="/">Home</a>
+            ·
+            <a href="/comics/all">All comics</a>
+            ·
+            <a href="/dashboard">Dashboard</a>
+            ·
+            <a href="/sync/status">Archive progress</a>
+        </p>
+    </header>
+
+    <main>
+        {{if .HasComic}}
+        <div class="heading">
+            <h2>#{{.Comic.Num}} — {{.Comic.Title}}</h2>
+            <p class="muted">
+                Published {{published .Comic}}
+                ·
+                {{.AvailableCount}} comics available locally
+            </p>
+        </div>
+
+        <nav class="navigation" aria-label="Comic navigation">
+            {{if ne .FirstID .Comic.Num}}
+            <a class="button" href="/comics?id={{.FirstID}}">First</a>
+            {{else}}
+            <span class="button disabled" aria-disabled="true">First</span>
+            {{end}}
+
+            {{if .PreviousID}}
+            <a class="button" href="/comics?id={{.PreviousID}}" rel="prev">← Previous</a>
+            {{else}}
+            <span class="button disabled" aria-disabled="true">← Previous</span>
+            {{end}}
+
+            <a class="button" href="/comics?random=1">Random</a>
+
+            {{if .NextID}}
+            <a class="button" href="/comics?id={{.NextID}}" rel="next">Next →</a>
+            {{else}}
+            <span class="button disabled" aria-disabled="true">Next →</span>
+            {{end}}
+
+            {{if ne .LastID .Comic.Num}}
+            <a class="button" href="/comics?id={{.LastID}}">Latest</a>
+            {{else}}
+            <span class="button disabled" aria-disabled="true">Latest</span>
+            {{end}}
+        </nav>
+
+        <figure>
+            <div class="image-frame">
+                <img class="comic-image" src="/comics/{{.Comic.Num}}/image" alt="{{.Comic.Alt}}" title="{{.Comic.Alt}}">
+            </div>
+
+            {{if .Comic.Alt}}
+            <figcaption>{{.Comic.Alt}}</figcaption>
+            {{end}}
+        </figure>
+
+        <div class="details">
+            <a href="/comics/{{.Comic.Num}}">Metadata JSON</a>
+            ·
+            <a href="/comics/{{.Comic.Num}}/image">Open image</a>
+        </div>
+        {{else}}
+        <section class="message">
+            <h2>Comic viewer</h2>
+            <p>{{.Message}}</p>
+            <p>
+                <a href="/comics">Open latest saved comic</a>
+                ·
+                <a href="/dashboard">View dashboard</a>
+            </p>
+        </section>
+        {{end}}
+    </main>
+
+    <footer class="muted">
+        Navigation includes only fully archived comics.
+        Images are served from the local archive.
+    </footer>
+</body>
+
+</html>

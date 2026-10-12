@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="15">
+    <title>XKCD Archive Dashboard</title>
+
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: system-ui, sans-serif;
+            background: #111827;
+            color: #e5e7eb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        a {
+            color: #93c5fd;
+        }
+
+        h1,
+        h2 {
+            margin-top: 0;
+        }
+
+        header {
+            margin-bottom: 24px;
+        }
+
+        .muted {
+            color: #9ca3af;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .card,
+        section {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 18px;
+        }
+
+        .card .value {
+            font-size: 1.9rem;
+            font-weight: 650;
+            margin-top: 8px;
+        }
+
+        section {
+            margin-bottom: 20px;
+        }
+
+        .error {
+            border-color: #f87171;
+            color: #fecaca;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th,
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #374151;
+            vertical-align: top;
+        }
+
+        th {
+            color: #9ca3af;
+            font-weight: 500;
+        }
+
+        .message {
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+            max-width: 500px;
+        }
+
+        .preview {
+            display: block;
+            max-width: 100%;
+            max-height: 500px;
+            object-fit: contain;
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+        }
+
+        dl {
+            display: grid;
+            grid-template-columns: minmax(150px, 1fr) 2fr;
+            gap: 12px;
+        }
+
+        dt {
+            color: #9ca3af;
+        }
+
+        dd {
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>XKCD Archive</h1>
+        <p class="muted">
+            Read-only application dashboard · refreshes every 15 seconds
+        </p>
+        <p>
+            <a href="/">Home</a>
+            ·
+            <a href="/comics">Comic viewer</a>
+            ·
+            <a href="/sync/status">Progress JSON</a>
+            ·
+            <a href="/comics/latest">Latest comic JSON</a>
+        </p>
+    </header>
+
+    {{if .Error}}
+    <section class="error" role="alert">
+        <h2>Statistics unavailable</h2>
+        <p>{{.Error}}</p>
+        <p>The page will retry on its next automatic refresh.</p>
+    </section>
+    {{else}}
+    <div class="cards">
+        <div class="card">
+            <div class="muted">Fully archived</div>
+            <div class="value">{{.CompleteCount}}</div>
+        </div>
+
+        <div class="card">
+            <div class="muted">Latest observed ID</div>
+            <div class="value">{{.LatestSeenID}}</div>
+        </div>
+
+        <div class="card">
+            <div class="muted">Next backfill ID</div>
+            <div class="value">{{.NextID}}</div>
+        </div>
+
+        <div class="card">
+            <div class="muted">Stored image payloads</div>
+            <div class="value">{{bytes .ImageBytes}}</div>
+        </div>
+    </div>
+
+    <section>
+        <h2>Application state</h2>
+
+        <dl>
+            <dt>Database statistics</dt>
+            <dd>Successfully loaded</dd>
+
+            <dt>API uptime</dt>
+            <dd>{{.Uptime}}</dd>
+
+            <dt>Latest saved marker</dt>
+            <dd>{{.LatestSavedID}}</dd>
+
+            <dt>Pending attempts</dt>
+            <dd>{{.PendingCount}}</dd>
+
+            <dt>Needs retry</dt>
+            <dd>{{.RetryCount}}</dd>
+
+            <dt>Known unavailable</dt>
+            <dd>{{.UnavailableCount}}</dd>
+
+            <dt>Progress record updated</dt>
+            <dd>{{time .ProgressAt}}</dd>
+        </dl>
+
+        <p class="muted">
+            Pending attempts may be running or interrupted.
+            The progress timestamp is not a scheduled-job heartbeat.
+            Image payload size excludes database indexes and other storage overhead.
+        </p>
+    </section>
+
+    {{if .LatestSavedID}}
+    <section>
+        <h2>Latest saved comic: {{.LatestSavedID}}</h2>
+
+        <p>
+            <a href="/comics/{{.LatestSavedID}}">Metadata</a>
+            ·
+            <a href="/comics/{{.LatestSavedID}}/image">Open image</a>
+        </p>
+
+        <img class="preview" src="/comics/{{.LatestSavedID}}/image" alt="Latest locally archived XKCD comic"
+            loading="lazy">
+    </section>
+    {{end}}
+
+    <section>
+        <h2>Recently archived</h2>
+
+        {{if .RecentComics}}
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>Image downloaded</th>
+                        <th>Image</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .RecentComics}}
+                    <tr>
+                        <td><a href="/comics/{{.ID}}">{{.ID}}</a></td>
+                        <td>{{.Title}}</td>
+                        <td>{{time .DownloadedAt}}</td>
+                        <td><a href="/comics/{{.ID}}/image">View</a></td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="muted">No comics have been fully archived yet.</p>
+        {{end}}
+    </section>
+
+    <section>
+        <h2>Recent retrieval errors</h2>
+
+        {{if .Failures}}
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Comic</th>
+                        <th>Attempts</th>
+                        <th>Last attempt</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Failures}}
+                    <tr>
+                        <td>{{.ComicID}}</td>
+                        <td>{{.Attempts}}</td>
+                        <td>{{time .LastAttemptAt}}</td>
+                        <td class="message">{{.Message}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="muted">No outstanding recorded retrieval errors.</p>
+        {{end}}
+    </section>
+    {{end}}
+
+    <footer class="muted">
+        Page refreshed: {{time .RefreshedAt}}
+    </footer>
+</body>
+
+</html>
