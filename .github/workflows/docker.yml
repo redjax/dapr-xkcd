@@ -1,0 +1,119 @@
+---
+name: Build API Container
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - ".containers/Dockerfile"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/api/**"
+      - "internal/**"
+      - ".github/workflows/docker.yml"
+
+      # Documentation and test-only changes do not affect the image.
+      # Exclusions must follow the positive patterns.
+      - "!**/*.md"
+      - "!**/*_test.go"
+
+  push:
+    branches:
+      - main
+    paths:
+      - ".containers/Dockerfile"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/api/**"
+      - "internal/**"
+      - ".github/workflows/docker.yml"
+
+      - "!**/*.md"
+      - "!**/*_test.go"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare image metadata
+    runs-on: ubuntu-latest
+
+    outputs:
+      tags: ${{ steps.image.outputs.tags }}
+      publish: ${{ steps.image.outputs.publish }}
+
+    steps:
+      - name: Prepare image tags and publishing decision
+        id: image
+        shell: bash
+        env:
+          IMAGE: ghcr.io/redjax/dapr-xkcd
+        run: |
+          set -euo pipefail
+
+          publish=false
+          tags=("${IMAGE}:sha-${GITHUB_SHA}")
+
+          # Only main-branch push events may publish.
+          # PRs and manual runs always build without publishing.
+          if [[ "${GITHUB_EVENT_NAME}" == "push" \
+             && "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            publish=true
+            tags+=("${IMAGE}:latest")
+          fi
+
+          {
+            printf 'publish=%s\n' "${publish}"
+            printf 'tags<<IMAGE_TAGS\n'
+            printf '%s\n' "${tags[@]}"
+            printf 'IMAGE_TAGS\n'
+          } >> "${GITHUB_OUTPUT}"
+
+  docker:
+    name: Build API image
+    needs: prepare
+
+    permissions:
+      contents: read
+      packages: write
+
+    uses: redjax/pipelinetemplates/.github/workflows/docker-build.yml@main
+
+    with:
+      context: .
+      dockerfile: .containers/Dockerfile
+      target: runtime
+
+      tags: ${{ needs.prepare.outputs.tags }}
+      platforms: linux/amd64,linux/arm64
+
+      build-args: |
+        GO_IMAGE=${{ vars.GO_IMAGE || 'golang:1.27-alpine' }}
+
+      labels: |
+        org.opencontainers.image.title=dapr-xkcd
+        org.opencontainers.image.description=Self-hosted XKCD archive and viewer
+        org.opencontainers.image.source=https://github.com/redjax/dapr-xkcd
+        org.opencontainers.image.revision=${{ github.sha }}
+
+      pull: true
+
+      cache-from: type=gha,scope=dapr-xkcd-api
+      cache-to: type=gha,mode=max,scope=dapr-xkcd-api
+
+      publish: ${{ needs.prepare.outputs.publish == 'true' }}
+      registry: ghcr.io
