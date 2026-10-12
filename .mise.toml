@@ -1,0 +1,5 @@
+[tools]
+dapr = "1.18.2"
+direnv = "2.38.2"
+go = "1.27.2"
+golangci-lint = "2.14.0"

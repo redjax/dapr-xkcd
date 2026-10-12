@@ -1,0 +1,18 @@
+bin/
+
+## Secrets
+.env
+.env/*
+env/*
+*.env
+
+*.secret[s]
+.secret[s].*
+.secret[s]/*
+
+*.local
+.local.*
+*.local.*
+
+!*example*.*
+!*.example*
