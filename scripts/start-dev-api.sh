@@ -1,57 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
+THIS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd -- "${THIS_DIR}/.." && pwd -P)"
 
-usage() {
-  cat <<EOF
-Usage:
-  ${SCRIPT_NAME} <app-id>
-  ${SCRIPT_NAME} -h | --help
+cd "${PROJECT_ROOT}"
 
-Stop a local Dapr instance by application ID.
+: "${APP_PORT:?Load the project environment with direnv first}"
+: "${DAPR_HTTP_PORT:?Set DAPR_HTTP_PORT}"
+: "${DAPR_GRPC_PORT:?Set DAPR_GRPC_PORT}"
 
-Arguments:
-  app-id      Application ID of the Dapr instance to stop.
+: "${POSTGRES_HOST:?Set POSTGRES_HOST}"
+: "${POSTGRES_PORT:?Set POSTGRES_PORT}"
+: "${POSTGRES_DB:?Set POSTGRES_DB}"
+: "${POSTGRES_USER:?Set POSTGRES_USER}"
+: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}"
 
-Options:
-  -h, --help  Show this help menu and exit.
+: "${XKCD_BASE_URL:?Set XKCD_BASE_URL}"
+: "${XKCD_MAX_RESPONSE_BODY_SIZE:?Set XKCD_MAX_RESPONSE_BODY_SIZE}"
+: "${LATEST_SCHEDULE:?Set LATEST_SCHEDULE}"
+: "${BACKFILL_SCHEDULE:?Set BACKFILL_SCHEDULE}"
 
-Examples:
-  ${SCRIPT_NAME} xkcd-archive
-  ${SCRIPT_NAME} --help
-EOF
-}
+mkdir -p bin
+go build -o bin/xkcd-api ./cmd/api
 
-if [[ $# -eq 1 && ("$1" == "-h" || "$1" == "--help") ]]; then
-  usage
-  exit 0
-fi
-
-if [[ $# -ne 1 ]]; then
-  printf 'Error: exactly one application ID is required.\n\n' >&2
-  usage >&2
-  exit 2
-fi
-
-APP_ID="$1"
-
-if [[ "$APP_ID" =~ ^[[:space:]]*$ ]]; then
-  printf 'Error: application ID must not be empty or whitespace-only.\n' >&2
-  exit 2
-fi
-
-if [[ "$APP_ID" == -* ]]; then
-  printf 'Error: unknown option: %s\n\n' "$APP_ID" >&2
-  usage >&2
-  exit 2
-fi
-
-if ! command -v dapr >/dev/null 2>&1; then
-  printf 'Error: dapr CLI is not installed or is not in PATH.\n' >&2
-  exit 1
-fi
-
-printf 'Stopping Dapr instance: %s\n' "$APP_ID"
-
-exec dapr stop --app-id "$APP_ID"
+exec dapr run \
+  --app-id xkcd-archive \
+  --app-port "$APP_PORT" \
+  --app-channel-address 127.0.0.1 \
+  --dapr-http-port "$DAPR_HTTP_PORT" \
+  --dapr-grpc-port "$DAPR_GRPC_PORT" \
+  --placement-host-address " " \
+  --scheduler-host-address " " \
+  --resources-path ./dapr/components \
+  -- ./bin/xkcd-api
