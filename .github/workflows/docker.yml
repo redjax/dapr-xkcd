@@ -1,0 +1,116 @@
+---
+name: Build API Container
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".containers/Dockerfile"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/api/**"
+      - "internal/**"
+      - ".github/workflows/docker.yml"
+
+      # Documentation and tests do not change the runtime binary.
+      # Exclusions must follow the positive patterns.
+      - "!**/*.md"
+      - "!**/*_test.go"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".containers/Dockerfile"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/api/**"
+      - "internal/**"
+      - ".github/workflows/docker.yml"
+
+      - "!**/*.md"
+      - "!**/*_test.go"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare image metadata
+    runs-on: ubuntu-latest
+
+    outputs:
+      tags: ${{ steps.image.outputs.tags }}
+      publish: ${{ steps.image.outputs.publish }}
+
+    steps:
+      - name: Prepare image tags and publishing decision
+        id: image
+        shell: bash
+        env:
+          IMAGE: ghcr.io/redjax/dapr-xkcd
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          publish=false
+          tags=("${IMAGE}:sha-${GITHUB_SHA}")
+
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            if [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+              publish=true
+              tags+=("${IMAGE}:latest")
+
+            elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              version="${GITHUB_REF#refs/tags/}"
+
+              if [[ ! "${version}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+                printf 'Invalid Docker image tag: %s\n' "${version}" >&2
+                exit 1
+              fi
+
+              publish=true
+              tags+=("${IMAGE}:${version}")
+            fi
+          fi
+
+          {
+            printf 'publish=%s\n' "${publish}"
+            printf 'tags<<IMAGE_TAGS\n'
+            printf '%s\n' "${tags[@]}"
+            printf 'IMAGE_TAGS\n'
+          } >> "${GITHUB_OUTPUT}"
+
+  docker:
+    name: Build API image
+    needs: prepare
+
+    permissions:
+      contents: read
+      packages: write
+
+    uses: redjax/pipelinetemplates/.github/workflows/docker-build.yml@main
+
+    with:
+      context: .
+      dockerfile: .containers/Dockerfile
+      target: runtime
+
+      tags: ${{ needs.prepare.outputs.tags }}
+      platforms: linux/amd64,linux/arm64
+
+      build-args: |
+        GO_IMAGE=${{ vars.GO_IMAGE || 'golang:1.27-alpine' }}
+
+      labels: |
+        org.opencontainers.image.title=dapr-xkcd
+        org.opencontainers.image.description=Self-hosted XKCD
