@@ -17,9 +17,6 @@ on:
       - "cmd/api/**"
       - "internal/**"
       - ".github/workflows/docker.yml"
-
-      # Documentation and test-only changes do not affect the image.
-      # Exclusions must follow the positive patterns.
       - "!**/*.md"
       - "!**/*_test.go"
 
@@ -39,6 +36,12 @@ on:
       - "!**/*_test.go"
 
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the built image to GHCR
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,19 +65,48 @@ jobs:
         shell: bash
         env:
           IMAGE: ghcr.io/redjax/dapr-xkcd
+          MANUAL_PUBLISH: ${{ inputs.publish == true }}
         run: |
           set -euo pipefail
 
           publish=false
           tags=("${IMAGE}:sha-${GITHUB_SHA}")
 
-          # Only main-branch push events may publish.
-          # PRs and manual runs always build without publishing.
+          # Publish automatically after a qualifying push to main.
           if [[ "${GITHUB_EVENT_NAME}" == "push" \
              && "${GITHUB_REF}" == "refs/heads/main" ]]; then
             publish=true
+
+          # Manual runs publish only when explicitly requested.
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" \
+               && "${MANUAL_PUBLISH}" == "true" ]]; then
+            publish=true
+          fi
+
+          # Only published main builds update latest.
+          if [[ "${publish}" == "true" \
+             && "${GITHUB_REF}" == "refs/heads/main" ]]; then
             tags+=("${IMAGE}:latest")
           fi
+
+          # A manually published version tag also gets its version image tag.
+          if [[ "${publish}" == "true" \
+             && "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+
+            if [[ ! "${version}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              printf 'Invalid Docker image tag: %s\n' "${version}" >&2
+              exit 1
+            fi
+
+            tags+=("${IMAGE}:${version}")
+          fi
+
+          printf 'Event: %s\n' "${GITHUB_EVENT_NAME}"
+          printf 'Ref: %s\n' "${GITHUB_REF}"
+          printf 'Publish: %s\n' "${publish}"
+          printf 'Image tags:\n'
+          printf '  %s\n' "${tags[@]}"
 
           {
             printf 'publish=%s\n' "${publish}"
@@ -82,6 +114,17 @@ jobs:
             printf '%s\n' "${tags[@]}"
             printf 'IMAGE_TAGS\n'
           } >> "${GITHUB_OUTPUT}"
+
+          {
+            printf '### Container build decision\n\n'
+            printf -- '- Event: `%s`\n' "${GITHUB_EVENT_NAME}"
+            printf -- '- Ref: `%s`\n' "${GITHUB_REF}"
+            printf -- '- Publish: `%s`\n' "${publish}"
+            printf '\nImage tags:\n\n'
+            printf '```text\n'
+            printf '%s\n' "${tags[@]}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   docker:
     name: Build API image
