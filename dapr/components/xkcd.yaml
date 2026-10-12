@@ -1,0 +1,23 @@
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: xkcd
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+    - name: url
+      secretKeyRef:
+        name: XKCD_BASE_URL
+        key: XKCD_BASE_URL
+    - name: direction
+      value: output
+    - name: errorIfNot2XX
+      value: "false"
+    - name: maxResponseBodySize
+      secretKeyRef:
+        name: XKCD_MAX_RESPONSE_BODY_SIZE
+        key: XKCD_MAX_RESPONSE_BODY_SIZE
+auth:
+  secretStore: environment
