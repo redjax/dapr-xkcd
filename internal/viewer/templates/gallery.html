@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>All Comics | XKCD Archive</title>
+
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: system-ui, sans-serif;
+            background: #111827;
+            color: #e5e7eb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        a {
+            color: #93c5fd;
+        }
+
+        header,
+        .pagination,
+        footer {
+            text-align: center;
+        }
+
+        header {
+            margin-bottom: 28px;
+        }
+
+        .muted {
+            color: #9ca3af;
+            line-height: 1.6;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 18px;
+        }
+
+        .card {
+            display: block;
+            overflow: hidden;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            background: #1f2937;
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .card:hover {
+            border-color: #93c5fd;
+            background: #273449;
+        }
+
+        a:focus-visible {
+            outline: 3px solid #93c5fd;
+            outline-offset: 4px;
+        }
+
+        .thumbnail {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 190px;
+            padding: 12px;
+            background: white;
+        }
+
+        .thumbnail img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .caption {
+            padding: 14px;
+        }
+
+        .comic-id {
+            margin-bottom: 6px;
+            color: #9ca3af;
+            font-size: 0.85rem;
+        }
+
+        .title {
+            margin: 0;
+            font-size: 1rem;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+
+        .pagination {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            margin: 28px 0;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 10px 16px;
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+            background: #1f2937;
+            color: #e5e7eb;
+            text-decoration: none;
+        }
+
+        .button:hover {
+            background: #374151;
+        }
+
+        .message {
+            padding: 32px;
+            text-align: center;
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+        }
+
+        footer {
+            margin-top: 28px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>All Comics</h1>
+        <p>
+            <a href="/">Home</a>
+            ·
+            <a href="/comics">Comic viewer</a>
+            ·
+            <a href="/dashboard">Dashboard</a>
+        </p>
+        <p class="muted">
+            Fully archived comics, newest first. Select a comic to open the viewer.
+        </p>
+    </header>
+
+    <main>
+        {{if .Message}}
+        <section class="message">
+            <p>{{.Message}}</p>
+            <p><a href="/comics/all">Return to the gallery</a></p>
+        </section>
+        {{else}}
+        {{if .Comics}}
+        <div class="grid">
+            {{range .Comics}}
+            <a class="card" href="/comics?id={{.ID}}" aria-label="Read comic {{.ID}}: {{.Title}}">
+                <div class="thumbnail">
+                    <img src="/comics/{{.ID}}/image" alt="" loading="lazy" decoding="async">
+                </div>
+                <div class="caption">
+                    <div class="comic-id">#{{.ID}}</div>
+                    <h2 class="title">{{.Title}}</h2>
+                </div>
+            </a>
+            {{end}}
+        </div>
+        {{else}}
+        <section class="message">
+            {{if .BeforeID}}
+            <p>No older archived comics were found.</p>
+            {{else}}
+            <p>No comics have been fully archived yet.</p>
+            {{end}}
+        </section>
+        {{end}}
+
+        <nav class="pagination" aria-label="Gallery navigation">
+            {{if .BeforeID}}
+            <a class="button" href="/comics/all">Newest comics</a>
+            {{end}}
+
+            {{if .NextID}}
+            <a class="button" href="/comics/all?before={{.NextID}}" rel="next">Older comics →</a>
+            {{end}}
+        </nav>
+        {{end}}
+    </main>
+
+    <footer class="muted">
+        Previews use locally stored images.
+    </footer>
+</body>
+
+</html>
