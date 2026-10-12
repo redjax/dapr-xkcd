@@ -25,13 +25,7 @@ services:
       retries: 20
 
   api:
-    image: "${API_IMAGE:-xkcd-api:local}"
-    pull_policy: build
-    build:
-      context: .
-      dockerfile: .containers/Dockerfile
-      args:
-        GO_IMAGE: "${GO_IMAGE:-golang:1.27.2-alpine}"
+    image: "${API_IMAGE:-ghcr.io/redjax/dapr-xkcd:latest}"
     restart: unless-stopped
     init: true
     stop_grace_period: 20s
