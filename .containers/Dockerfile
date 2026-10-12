@@ -2,7 +2,8 @@
 
 ARG GO_IMAGE=golang:1.27-alpine
 
-FROM ${GO_IMAGE} AS builder
+## Run the compiler on the builder's native architecture.
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS builder
 
 WORKDIR /src
 
@@ -11,11 +12,17 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build \
-    -trimpath \
-    -ldflags="-s -w" \
-    -o /out/xkcd-api \
-    ./cmd/api
+ARG TARGETOS
+ARG TARGETARCH
+
+RUN CGO_ENABLED=0 \
+    GOOS=${TARGETOS} \
+    GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /out/xkcd-api \
+      ./cmd/api
 
 FROM alpine:3.23 AS runtime
 
