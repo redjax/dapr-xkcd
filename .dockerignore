@@ -1,0 +1,17 @@
+.git
+.gitignore
+
+.env
+.env.*
+.envrc
+.envrc.*
+.direnv
+
+bin
+coverage.out
+*.test
+
+data
+backups
+
+README.md

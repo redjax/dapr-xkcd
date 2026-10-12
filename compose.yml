@@ -1,0 +1,130 @@
+---
+name: dapr-xkcd
+
+volumes:
+  postgres-data: {}
+  caddy-data: {}
+  caddy-config: {}
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_CONTAINER_IMG:-17-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB}"
+      POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}"
+    volumes:
+      - "${POSTGRES_DATA_DIR:-postgres-data}:/var/lib/postgresql/data"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: "${API_IMAGE:-xkcd-api:local}"
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: .containers/Dockerfile
+      args:
+        GO_IMAGE: "${GO_IMAGE:-golang:1.27.2-alpine}"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "${APP_PORT:-8281}"
+
+      INGESTION_TIMEOUT: "${INGESTION_TIMEOUT:-120s}"
+      STATE_READ_TIMEOUT: "${STATE_READ_TIMEOUT:-10s}"
+
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB}"
+      POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}"
+      POSTGRES_SSLMODE: "${POSTGRES_SSLMODE:-disable}"
+
+      XKCD_USER_AGENT: "${XKCD_USER_AGENT:-xkcd-archive-demo/0.1}"
+      XKCD_REQUEST_GAP: "${XKCD_REQUEST_GAP:-30s}"
+      XKCD_RATE_LIMIT_COOLDOWN: "${XKCD_RATE_LIMIT_COOLDOWN:-15m}"
+      XKCD_MAX_IMAGE_BYTES: "${XKCD_MAX_IMAGE_BYTES:-20971520}"
+
+      DAPR_GRPC_PORT: "${DAPR_GRPC_PORT:-50001}"
+      DAPR_CLIENT_TIMEOUT_SECONDS: "${DAPR_CLIENT_TIMEOUT_SECONDS:-60}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null "http://127.0.0.1:$$APP_PORT/health/live"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 75s
+
+  api-dapr:
+    image: daprio/daprd:${DAPR_CONTAINER_IMG:-1.18.7}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    network_mode: "service:api"
+    command:
+      - ./daprd
+      - --mode
+      - standalone
+      - --app-id
+      - xkcd-archive
+      - --app-port
+      - "${APP_PORT:-8281}"
+      - --app-channel-address
+      - "127.0.0.1"
+      - --app-protocol
+      - http
+      - --dapr-http-port
+      - "${DAPR_HTTP_PORT:-3500}"
+      - --dapr-grpc-port
+      - "${DAPR_GRPC_PORT:-50001}"
+      - --dapr-listen-addresses
+      - "127.0.0.1"
+      - --placement-host-address
+      - " "
+      - --scheduler-host-address
+      - " "
+      - --resources-path
+      - /components
+      - --log-level
+      - info
+    environment:
+      XKCD_BASE_URL: "${XKCD_BASE_URL:-https://xkcd.com}"
+      XKCD_MAX_RESPONSE_BODY_SIZE: "${XKCD_MAX_RESPONSE_BODY_SIZE:-1Mi}"
+      LATEST_SCHEDULE: "${LATEST_SCHEDULE:-@every 1h}"
+      BACKFILL_SCHEDULE: "${BACKFILL_SCHEDULE:-@every 1m}"
+    volumes:
+      - ./dapr/components:/components:ro
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      APP_PORT: "${APP_PORT:-8281}"
+    ports:
+      - "${CADDY_HTTP_PORT:-127.0.0.1:80}:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
