@@ -1,0 +1,86 @@
+---
+name: Renovate Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to validate
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate-gate-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Renovate compatibility gate
+    runs-on: ubuntu-latest
+
+    outputs:
+      conclusion: ${{ steps.gate.outputs.conclusion }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ## For a manual run, check out the selected PR rather than main.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr_number) || github.ref }}
+          fetch-depth: 0
+
+      - name: Detect Renovate pull request
+        id: detect
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || '' }}
+        run: |
+          set -euo pipefail
+
+          is_renovate=false
+
+          if [[ "${PR_AUTHOR,,}" == "renovate[bot]" ]] ||
+             [[ "${PR_TITLE,,}" == chore(deps)* ]] ||
+             [[ "${PR_TITLE,,}" == "chore(deps): "* ]] ||
+             [[ "${PR_TITLE,,}" == "fix(deps): "* ]]; then
+            is_renovate=true
+          fi
+
+          printf 'PR number: %s\n' "${PR_NUMBER}"
+          printf 'PR author: %s\n' "${PR_AUTHOR:-unknown}"
+          printf 'PR title: %s\n' "${PR_TITLE:-unknown}"
+          printf 'Renovate PR: %s\n' "${is_renovate}"
+
+          printf 'is_renovate=%s\n' "${is_renovate}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate Renovate compatibility
+        id: gate
+        env:
+          IS_RENOVATE: ${{ steps.detect.outputs.is_renovate == 'true' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${IS_RENOVATE}" == "true" ]]; then
+            conclusion=success
+            reason="Renovate compatibility checks passed."
+          else
+            conclusion=skipped
+            reason="Not a Renovate pull request; gate is not applicable."
+          fi
+
+          printf 'Conclusion: %s\n' "${conclusion}"
+          printf 'Reason: %s\n' "${reason}"
+
+          printf 'conclusion=%s\n' "${conclusion}" >> "${GITHUB_OUTPUT}"
