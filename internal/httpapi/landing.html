@@ -79,6 +79,33 @@
             text-align: center;
             font-size: 0.9rem;
         }
+
+        .source-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #93c5fd;
+            font-weight: 600;
+            text-decoration: none;
+            vertical-align: middle;
+        }
+
+        .source-link:hover,
+        .source-link:focus-visible {
+            color: #bfdbfe;
+        }
+
+        .source-link:focus-visible {
+            outline: 3px solid #93c5fd;
+            outline-offset: 4px;
+        }
+
+        .source-icon {
+            display: block;
+            width: 20px;
+            height: 20px;
+            object-fit: contain;
+        }
     </style>
 </head>
 
@@ -86,7 +113,7 @@
     <header>
         <h1>XKCD Archive</h1>
         <p class="muted">
-            XKCD comic reader proxy.
+            XKCD comic reader proxy & archive.
         </p>
     </header>
 
@@ -116,7 +143,17 @@
     </main>
 
     <footer class="muted">
-        Comics and images are served from a local archive to avoid blasting the XKCD API.
+        <p>
+            Comics and images are served from a local archive to avoid blasting the XKCD API.
+        </p>
+
+        <p>
+            Check out the project's source code on
+            <a class="source-link" href="https://github.com/redjax/dapr-xkcd" rel="noopener noreferrer">
+                <img class="source-icon" src="/static/img/git-logo.png" alt="" width="20" height="20" />
+                GitHub
+            </a>.
+        </p>
     </footer>
 </body>
 
