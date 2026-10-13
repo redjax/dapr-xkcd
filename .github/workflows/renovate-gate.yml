@@ -25,62 +25,105 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: Renovate compatibility gate
+  changes:
+    name: Detect changes
     runs-on: ubuntu-latest
-
     outputs:
-      conclusion: ${{ steps.gate.outputs.conclusion }}
-
+      container-changed: ${{ steps.filter.outputs.container-changed }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ## For a manual run, check out the selected PR rather than main.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr_number) || github.ref }}
           fetch-depth: 0
-
-      - name: Detect Renovate pull request
-        id: detect
+      - name: Detect container and application changes
+        id: filter
         env:
-          PR_TITLE: ${{ github.event.pull_request.title || '' }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login || '' }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || '' }}
+          BEFORE: ${{ github.event.pull_request.base.sha }}
+          AFTER: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
 
-          is_renovate=false
 
-          if [[ "${PR_AUTHOR,,}" == "renovate[bot]" ]] ||
-             [[ "${PR_TITLE,,}" == chore(deps)* ]] ||
-             [[ "${PR_TITLE,,}" == "chore(deps): "* ]] ||
-             [[ "${PR_TITLE,,}" == "fix(deps): "* ]]; then
-            is_renovate=true
+          if [[ -z "${BEFORE}" || -z "${AFTER}" ]]; then
+            printf 'No pull-request diff available; treating container as changed.\n' >&2
+            printf 'container-changed=true\n' >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
 
-          printf 'PR number: %s\n' "${PR_NUMBER}"
-          printf 'PR author: %s\n' "${PR_AUTHOR:-unknown}"
-          printf 'PR title: %s\n' "${PR_TITLE:-unknown}"
-          printf 'Renovate PR: %s\n' "${is_renovate}"
 
-          printf 'is_renovate=%s\n' "${is_renovate}" >> "${GITHUB_OUTPUT}"
+          changed="$(git diff --name-only "${BEFORE}" "${AFTER}" || true)"
 
-      - name: Validate Renovate compatibility
-        id: gate
+          printf 'Changed files:\n%s\n' "${changed:-<none>}"
+
+          container_changed=false
+
+          if printf '%s\n' "${changed}" |
+             grep -Eq '^(\.containers/|\.github/workflows/|cmd/|internal/|go\.(mod|sum)$)'; then
+            container_changed=true
+          fi
+
+          printf 'Container changed: %s\n' "${container_changed}"
+          printf 'container-changed=%s\n' "${container_changed}" >> "${GITHUB_OUTPUT}"
+
+  container:
+    name: Container build
+    needs: changes
+    if: needs.changes.outputs.container-changed == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: redjax/pipelinetemplates/.github/workflows/docker-build.yml@main
+    with:
+      context: .
+      dockerfile: .containers/Dockerfile
+      target: runtime
+      tags: ghcr.io/redjax/dapr-xkcd:renovate-gate
+      platforms: linux/amd64
+      build-args: |
+        GO_IMAGE=${{ vars.GO_IMAGE || 'golang:1.27-alpine' }}
+      labels: |
+        org.opencontainers.image.title=dapr-xkcd
+        org.opencontainers.image.description=Self-hosted XKCD archive and viewer
+        org.opencontainers.image.source=https://github.com/redjax/dapr-xkcd
+        org.opencontainers.image.revision=${{ github.sha }}
+      pull: true
+      cache-from: type=gha,scope=dapr-xkcd-api
+      cache-to: type=gha,mode=max,scope=dapr-xkcd-api
+      publish: false
+      registry: ghcr.io
+
+  renovate-gate:
+    name: Renovate compatibility gate
+    needs: [changes, container]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate Renovate gate
         env:
-          IS_RENOVATE: ${{ steps.detect.outputs.is_renovate == 'true' }}
+          CONTAINER_CHANGED: ${{ needs.changes.outputs.container-changed }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
         run: |
           set -euo pipefail
 
-          if [[ "${IS_RENOVATE}" == "true" ]]; then
-            conclusion=success
-            reason="Renovate compatibility checks passed."
-          else
-            conclusion=skipped
-            reason="Not a Renovate pull request; gate is not applicable."
+          printf 'Container changed: %s\n' "${CONTAINER_CHANGED}"
+          printf 'Container build result: %s\n' "${CONTAINER_RESULT}"
+
+          if [[ "${CONTAINER_CHANGED}" == "false" ]]; then
+            printf 'No relevant files changed; build was intentionally skipped.\n'
+            exit 0
           fi
 
-          printf 'Conclusion: %s\n' "${conclusion}"
-          printf 'Reason: %s\n' "${reason}"
+          if [[ "${CONTAINER_RESULT}" != "success" ]]; then
+            printf 'Container build result: %s\n' "${CONTAINER_RESULT}" >&2
+            exit 1
+          fi
 
-          printf 'conclusion=%s\n' "${conclusion}" >> "${GITHUB_OUTPUT}"
+          printf 'Container build succeeded.\n'
+
+          {
+            printf '### Renovate gate\n\n'
+            printf -- '- Container changed: `%s`\n' "${CONTAINER_CHANGED}"
+            printf -- '- Container build result: `%s`\n' "${CONTAINER_RESULT}"
+            printf -- '- Gate conclusion: `success`\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
