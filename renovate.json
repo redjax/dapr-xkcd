@@ -1,0 +1,121 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "github>redjax/PipelineTemplates//config/renovate/default#main"
+    ],
+    "platformAutomerge": true,
+    "enabledManagers": [
+        "gomod",
+        "github-actions",
+        "dockerfile",
+        "docker-compose",
+        "mise"
+    ],
+    "packageRules": [
+        {
+            "description": "Automerge low-risk Go module updates",
+            "matchManagers": [
+                "gomod"
+            ],
+            "matchUpdateTypes": [
+                "patch",
+                "minor",
+                "digest"
+            ],
+            "automerge": true,
+            "automergeType": "pr"
+        },
+        {
+            "description": "Require review for Go major updates",
+            "matchManagers": [
+                "gomod"
+            ],
+            "matchUpdateTypes": [
+                "major"
+            ],
+            "automerge": false
+        },
+        {
+            "description": "Automerge low-risk GitHub Actions updates",
+            "matchManagers": [
+                "github-actions"
+            ],
+            "matchUpdateTypes": [
+                "minor",
+                "patch",
+                "digest"
+            ],
+            "automerge": true,
+            "automergeType": "pr"
+        },
+        {
+            "description": "Require review for GitHub Actions major updates",
+            "matchManagers": [
+                "github-actions"
+            ],
+            "matchUpdateTypes": [
+                "major"
+            ],
+            "automerge": false
+        },
+        {
+            "description": "Automerge Docker image digest updates",
+            "matchManagers": [
+                "dockerfile",
+                "docker-compose"
+            ],
+            "matchUpdateTypes": [
+                "digest"
+            ],
+            "automerge": true,
+            "automergeType": "pr"
+        },
+        {
+            "description": "Automerge Docker image minor and patch updates",
+            "matchManagers": [
+                "dockerfile",
+                "docker-compose"
+            ],
+            "matchUpdateTypes": [
+                "minor",
+                "patch"
+            ],
+            "automerge": true,
+            "automergeType": "pr"
+        },
+        {
+            "description": "Require review for Docker image major updates",
+            "matchManagers": [
+                "dockerfile",
+                "docker-compose"
+            ],
+            "matchUpdateTypes": [
+                "major"
+            ],
+            "automerge": false
+        },
+        {
+            "description": "Automerge mise patch and minor tool updates",
+            "matchManagers": [
+                "mise"
+            ],
+            "matchUpdateTypes": [
+                "minor",
+                "patch",
+                "digest"
+            ],
+            "automerge": true,
+            "automergeType": "pr"
+        },
+        {
+            "description": "Require review for mise major tool updates",
+            "matchManagers": [
+                "mise"
+            ],
+            "matchUpdateTypes": [
+                "major"
+            ],
+            "automerge": false
+        }
+    ]
+}
