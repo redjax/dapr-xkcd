@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
-	_ "embed"
+	"embed"
+	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -12,6 +14,9 @@ import (
 
 //go:embed landing.html
 var landingHTML []byte
+
+//go:embed all:static
+var staticFiles embed.FS
 
 type Service interface {
 	CheckLatest(ctx context.Context) error
@@ -49,6 +54,17 @@ func NewServer(
 	}
 
 	mux := http.NewServeMux()
+
+	staticRoot, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		// NewServer cannot return an error, so fail loudly during startup.
+		panic(fmt.Errorf("create embedded static filesystem: %w", err))
+	}
+
+	mux.Handle(
+		"GET /static/",
+		http.StripPrefix("/static/", http.FileServer(http.FS(staticRoot))),
+	)
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

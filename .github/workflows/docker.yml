@@ -70,7 +70,8 @@ jobs:
           set -euo pipefail
 
           publish=false
-          tags=("${IMAGE}:sha-${GITHUB_SHA}")
+          short_sha="${GITHUB_SHA:0:7}"
+          tags=("${IMAGE}:${short_sha}")
 
           # Publish automatically after a qualifying push to main.
           if [[ "${GITHUB_EVENT_NAME}" == "push" \
