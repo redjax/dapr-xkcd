@@ -2,24 +2,6 @@
 name: Build API Container
 
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-    paths:
-      - ".containers/Dockerfile"
-      - ".dockerignore"
-      - "go.mod"
-      - "go.sum"
-      - "cmd/api/**"
-      - "internal/**"
-      - ".github/workflows/docker.yml"
-      - "!**/*.md"
-      - "!**/*_test.go"
-
   push:
     branches:
       - main
@@ -54,11 +36,9 @@ jobs:
   prepare:
     name: Prepare image metadata
     runs-on: ubuntu-latest
-
     outputs:
       tags: ${{ steps.image.outputs.tags }}
       publish: ${{ steps.image.outputs.publish }}
-
     steps:
       - name: Prepare image tags and publishing decision
         id: image
@@ -69,28 +49,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          publish=false
           short_sha="${GITHUB_SHA:0:7}"
-          tags=("${IMAGE}:${short_sha}")
 
-          # Publish automatically after a qualifying push to main.
+          publish=false
+          tags=("${IMAGE}:sha-${short_sha}")
+
+          ## Publish automatically after a qualifying push to main.
           if [[ "${GITHUB_EVENT_NAME}" == "push" \
              && "${GITHUB_REF}" == "refs/heads/main" ]]; then
             publish=true
 
-          # Manual runs publish only when explicitly requested.
+          ## Manual runs publish only when explicitly requested.
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" \
                && "${MANUAL_PUBLISH}" == "true" ]]; then
             publish=true
           fi
 
-          # Only published main builds update latest.
+          ## Only published main builds update latest.
           if [[ "${publish}" == "true" \
              && "${GITHUB_REF}" == "refs/heads/main" ]]; then
             tags+=("${IMAGE}:latest")
           fi
 
-          # A manually published version tag also gets its version image tag.
+          ## A manually published version tag also gets its version image tag.
           if [[ "${publish}" == "true" \
              && "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/}"
@@ -105,6 +86,7 @@ jobs:
 
           printf 'Event: %s\n' "${GITHUB_EVENT_NAME}"
           printf 'Ref: %s\n' "${GITHUB_REF}"
+          printf 'Short SHA: %s\n' "${short_sha}"
           printf 'Publish: %s\n' "${publish}"
           printf 'Image tags:\n'
           printf '  %s\n' "${tags[@]}"
@@ -116,10 +98,12 @@ jobs:
             printf 'IMAGE_TAGS\n'
           } >> "${GITHUB_OUTPUT}"
 
+
           {
             printf '### Container build decision\n\n'
             printf -- '- Event: `%s`\n' "${GITHUB_EVENT_NAME}"
             printf -- '- Ref: `%s`\n' "${GITHUB_REF}"
+            printf -- '- Short SHA: `%s`\n' "${short_sha}"
             printf -- '- Publish: `%s`\n' "${publish}"
             printf '\nImage tags:\n\n'
             printf '```text\n'
@@ -130,34 +114,25 @@ jobs:
   docker:
     name: Build API image
     needs: prepare
-
     permissions:
       contents: read
       packages: write
-
     uses: redjax/pipelinetemplates/.github/workflows/docker-build.yml@main
-
     with:
       context: .
       dockerfile: .containers/Dockerfile
       target: runtime
-
       tags: ${{ needs.prepare.outputs.tags }}
       platforms: linux/amd64,linux/arm64
-
       build-args: |
         GO_IMAGE=${{ vars.GO_IMAGE || 'golang:1.27-alpine' }}
-
       labels: |
         org.opencontainers.image.title=dapr-xkcd
         org.opencontainers.image.description=Self-hosted XKCD archive and viewer
         org.opencontainers.image.source=https://github.com/redjax/dapr-xkcd
         org.opencontainers.image.revision=${{ github.sha }}
-
       pull: true
-
       cache-from: type=gha,scope=dapr-xkcd-api
       cache-to: type=gha,mode=max,scope=dapr-xkcd-api
-
       publish: ${{ needs.prepare.outputs.publish == 'true' }}
       registry: ghcr.io
