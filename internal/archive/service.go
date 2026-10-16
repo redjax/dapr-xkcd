@@ -61,7 +61,12 @@ func (s *Service) checkLatest(ctx context.Context) error {
 		return err
 	}
 
-	image, err := s.source.DownloadImage(ctx, comic.Img)
+	imageURL, err := ResolveImageURL(comic.Num, comic.Img)
+	if err != nil {
+		return s.recordFailure(ctx, comic.Num, err)
+	}
+
+	image, err := s.source.DownloadImage(ctx, imageURL)
 	if err != nil {
 		return s.recordFailure(ctx, comic.Num, err)
 	}
@@ -129,7 +134,12 @@ func (s *Service) BackfillOne(ctx context.Context) error {
 		))
 	}
 
-	image, err := s.source.DownloadImage(ctx, comic.Img)
+	imageURL, err := ResolveImageURL(id, comic.Img)
+	if err != nil {
+		return s.recordFailure(ctx, id, err)
+	}
+
+	image, err := s.source.DownloadImage(ctx, imageURL)
 	if err != nil {
 		return s.recordFailure(ctx, id, err)
 	}
