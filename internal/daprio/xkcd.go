@@ -216,13 +216,34 @@ func (x *XKCD) DownloadImage(
 }
 
 func validateImageURL(u *url.URL) error {
+	// Enforce HTTPS, disallow embedded credentials, and allow only
+	// the default HTTPS port.
 	if u.Scheme != "https" ||
-		!strings.EqualFold(u.Hostname(), "imgs.xkcd.com") ||
 		u.User != nil ||
 		(u.Port() != "" && u.Port() != "443") {
-		return fmt.Errorf("image URL must use HTTPS on imgs.xkcd.com")
+		return fmt.Errorf(
+			"image URL must use HTTPS without credentials on an allowed XKCD host: %s",
+			u.Redacted(),
+		)
 	}
-	return nil
+
+	// Normal comic images.
+	if strings.EqualFold(u.Hostname(), "imgs.xkcd.com") {
+		return nil
+	}
+
+	// Comic 1190 ("Time") uses this specific redirect endpoint.
+	if strings.EqualFold(u.Hostname(), "c.xkcd.com") &&
+		u.EscapedPath() == "/redirect/comic/time" &&
+		u.RawQuery == "" &&
+		!u.ForceQuery {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"image URL must use imgs.xkcd.com or the XKCD Time redirect endpoint: %s",
+		u.Redacted(),
+	)
 }
 
 // Called with x.mu held.
