@@ -48,6 +48,17 @@ func NewXKCD(client dapr.Client, options XKCDOptions) *XKCD {
 				if len(via) >= 5 {
 					return fmt.Errorf("too many image redirects")
 				}
+
+				// XKCD's Time endpoint can redirect to an HTTP image URL.
+				// Upgrade only the expected image host, without credentials
+				// or an explicit port, before making the request.
+				if req.URL.Scheme == "http" &&
+					strings.EqualFold(req.URL.Hostname(), "imgs.xkcd.com") &&
+					req.URL.User == nil &&
+					req.URL.Port() == "" {
+					req.URL.Scheme = "https"
+				}
+
 				return validateImageURL(req.URL)
 			},
 		},
