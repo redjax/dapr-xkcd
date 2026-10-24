@@ -49,13 +49,14 @@ func NewXKCD(client dapr.Client, options XKCDOptions) *XKCD {
 					return fmt.Errorf("too many image redirects")
 				}
 
-				// XKCD's Time endpoint can redirect to an HTTP image URL.
-				// Upgrade only the expected image host, without credentials
-				// or an explicit port, before making the request.
+				// XKCD sometimes returns HTTP redirect destinations.
+				// Upgrade only our explicitly allowed hosts before
+				// validating and sending the next request.
 				if req.URL.Scheme == "http" &&
-					strings.EqualFold(req.URL.Hostname(), "imgs.xkcd.com") &&
 					req.URL.User == nil &&
-					req.URL.Port() == "" {
+					req.URL.Port() == "" &&
+					(strings.EqualFold(req.URL.Hostname(), "imgs.xkcd.com") ||
+						strings.EqualFold(req.URL.Hostname(), "c.xkcd.com")) {
 					req.URL.Scheme = "https"
 				}
 
@@ -227,8 +228,8 @@ func (x *XKCD) DownloadImage(
 }
 
 func validateImageURL(u *url.URL) error {
-	// Enforce HTTPS, disallow embedded credentials, and allow only
-	// the default HTTPS port.
+	// Require encrypted requests without embedded credentials
+	// or nonstandard ports.
 	if u.Scheme != "https" ||
 		u.User != nil ||
 		(u.Port() != "" && u.Port() != "443") {
@@ -238,21 +239,20 @@ func validateImageURL(u *url.URL) error {
 		)
 	}
 
-	// Normal comic images.
+	// Normal image files.
 	if strings.EqualFold(u.Hostname(), "imgs.xkcd.com") {
 		return nil
 	}
 
-	// Comic 1190 ("Time") uses this specific redirect endpoint.
+	// XKCD's comic-image redirect service, including Time and Now.
 	if strings.EqualFold(u.Hostname(), "c.xkcd.com") &&
-		u.EscapedPath() == "/redirect/comic/time" &&
-		u.RawQuery == "" &&
-		!u.ForceQuery {
+		strings.HasPrefix(u.EscapedPath(), "/redirect/comic/") &&
+		len(u.EscapedPath()) > len("/redirect/comic/") {
 		return nil
 	}
 
 	return fmt.Errorf(
-		"image URL must use imgs.xkcd.com or the XKCD Time redirect endpoint: %s",
+		"image URL must use imgs.xkcd.com or c.xkcd.com/redirect/comic/: %s",
 		u.Redacted(),
 	)
 }
