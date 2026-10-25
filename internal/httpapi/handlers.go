@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/redjax/dapr-xkcd/internal/archive"
 )
@@ -18,13 +19,40 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func (a *API) job(run func(context.Context) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		status := http.StatusOK
+		outcome := "started"
+
+		a.log.Info(
+			"ingestion request started",
+			"route", r.URL.Path,
+			"method", r.Method,
+			"remote", r.RemoteAddr,
+		)
+
+		defer func() {
+			a.log.Info(
+				"ingestion request finished",
+				"route", r.URL.Path,
+				"method", r.Method,
+				"status", status,
+				"outcome", outcome,
+				"duration", time.Since(started),
+				"request_context_error", r.Context().Err(),
+			)
+		}()
+
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+			outcome = "binding probe"
+			w.WriteHeader(status)
 			return
 		}
+
 		if r.Method != http.MethodPost {
+			status = http.StatusMethodNotAllowed
+			outcome = "method not allowed"
 			w.Header().Set("Allow", "POST, OPTIONS")
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.WriteHeader(status)
 			return
 		}
 
@@ -35,18 +63,33 @@ func (a *API) job(run func(context.Context) error) http.HandlerFunc {
 		defer cancel()
 
 		err := run(ctx)
+
 		if errors.Is(err, archive.ErrBusy) {
-			w.WriteHeader(http.StatusNoContent)
+			outcome = "busy"
+			w.WriteHeader(status)
 			return
 		}
+
 		if err != nil {
-			a.log.Error("ingestion failed", "route", r.URL.Path, "error", err)
-			writeJSON(w, 503, map[string]string{
+			status = http.StatusServiceUnavailable
+			outcome = "failed"
+
+			a.log.Error(
+				"ingestion failed",
+				"route", r.URL.Path,
+				"error", err,
+				"request_context_error", r.Context().Err(),
+				"job_context_error", ctx.Err(),
+			)
+
+			writeJSON(w, status, map[string]string{
 				"error": "ingestion failed; see application logs",
 			})
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+
+		outcome = "handled"
+		w.WriteHeader(status)
 	}
 }
 
