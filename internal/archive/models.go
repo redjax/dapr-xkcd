@@ -53,6 +53,8 @@ type Store interface {
 	LoadProgress(ctx context.Context) (Progress, error)
 	IsComplete(ctx context.Context, id int) (bool, error)
 
+	RetryManaged(ctx context.Context, id int) (bool, error)
+
 	ObserveLatest(ctx context.Context, id int) error
 	MarkAttempt(ctx context.Context, id int) error
 	MarkFailed(ctx context.Context, id int, message string) error
@@ -64,6 +66,12 @@ type Store interface {
 		progress Progress,
 	) error
 
+	SaveRetryComplete(
+		ctx context.Context,
+		comic Comic,
+		image Image,
+	) error
+
 	SaveSkipped(
 		ctx context.Context,
 		id int,
@@ -72,4 +80,19 @@ type Store interface {
 	) error
 
 	SaveProgress(ctx context.Context, progress Progress) error
+
+	QueueBackfillFailure(
+		ctx context.Context,
+		id int,
+		message string,
+		progress Progress,
+	) error
+
+	ClaimRetry(ctx context.Context) (int, error)
+
+	FinishRetryFailure(
+		ctx context.Context,
+		id int,
+		message string,
+	) error
 }

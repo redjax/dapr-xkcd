@@ -31,6 +31,7 @@ func (s *Store) GetComic(ctx context.Context, id int) (archive.Comic, error) {
 		`SELECT metadata FROM comics WHERE id = $1`,
 		id,
 	).Scan(&data)
+
 	if errors.Is(err, pgx.ErrNoRows) {
 		return comic, archive.ErrNotFound
 	}
@@ -41,6 +42,7 @@ func (s *Store) GetComic(ctx context.Context, id int) (archive.Comic, error) {
 	if err := json.Unmarshal(data, &comic); err != nil {
 		return comic, err
 	}
+
 	comic.Metadata = json.RawMessage(data)
 	return comic, nil
 }
@@ -53,9 +55,11 @@ func (s *Store) GetImage(ctx context.Context, id int) (archive.Image, error) {
 		FROM comic_images
 		WHERE comic_id = $1
 	`, id).Scan(&image.Data, &image.ContentType, &image.SHA256)
+
 	if errors.Is(err, pgx.ErrNoRows) {
 		return image, archive.ErrNotFound
 	}
+
 	return image, err
 }
 
@@ -72,54 +76,98 @@ func (s *Store) LoadProgress(ctx context.Context) (archive.Progress, error) {
 		&progress.NextID,
 		&progress.UpdatedAt,
 	)
+
 	return progress, err
 }
 
 func (s *Store) IsComplete(ctx context.Context, id int) (bool, error) {
 	var complete bool
+
 	err := s.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM comic_fetches f
 			JOIN comics c ON c.id = f.comic_id
 			JOIN comic_images i ON i.comic_id = c.id
-			WHERE f.comic_id = $1 AND f.status = 'complete'
+			WHERE f.comic_id = $1
+				AND f.status = 'complete'
 		)
 	`, id).Scan(&complete)
+
 	return complete, err
+}
+
+func (s *Store) RetryManaged(ctx context.Context, id int) (bool, error) {
+	var managed bool
+
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM comic_fetches
+			WHERE comic_id = $1
+				AND status IN ('retry_pending', 'failed', 'unavailable')
+		)
+	`, id).Scan(&managed)
+
+	return managed, err
 }
 
 func (s *Store) ObserveLatest(ctx context.Context, id int) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE sync_state
 		SET latest_seen_id = GREATEST(latest_seen_id, $1),
-		    updated_at = now()
+			updated_at = now()
 		WHERE name = 'xkcd'
 	`, id)
+
 	return err
 }
 
 func (s *Store) MarkAttempt(ctx context.Context, id int) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO comic_fetches
-		    (comic_id, status, attempts, last_attempt_at)
+			(comic_id, status, attempts, last_attempt_at)
 		VALUES ($1, 'pending', 1, now())
 		ON CONFLICT (comic_id) DO UPDATE
 		SET status = 'pending',
-		    attempts = comic_fetches.attempts + 1,
-		    last_attempt_at = now(),
-		    last_error = NULL
+			attempts = comic_fetches.attempts + 1,
+			last_attempt_at = now(),
+			last_error = NULL
 	`, id)
+
 	return err
 }
 
-func (s *Store) MarkFailed(ctx context.Context, id int, message string) error {
-	_, err := s.pool.Exec(ctx, `
+func (s *Store) MarkFailed(
+	ctx context.Context,
+	id int,
+	message string,
+) error {
+	result, err := s.pool.Exec(ctx, `
 		UPDATE comic_fetches
-		SET status = 'retry_pending', last_error = $2
+		SET status = CASE
+				WHEN retry_attempts >= 5 THEN 'failed'
+				ELSE 'retry_pending'
+			END,
+			last_error = $2,
+			next_retry_at = CASE
+				WHEN retry_attempts >= 5 THEN NULL
+				ELSE COALESCE(
+					next_retry_at,
+					now() + interval '5 minutes'
+				)
+			END
 		WHERE comic_id = $1
 	`, id, message)
-	return err
+
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("record failure: comic %d has no attempt row", id)
+	}
+
+	return nil
 }
 
 func (s *Store) SaveProgress(
@@ -131,15 +179,16 @@ func (s *Store) SaveProgress(
 		progress.LatestSavedID,
 		progress.NextID,
 	)
+
 	return err
 }
 
 const progressSQL = `
 	UPDATE sync_state
 	SET latest_seen_id = GREATEST(latest_seen_id, $1),
-	    latest_saved_id = GREATEST(latest_saved_id, $2),
-	    backfill_next_id = $3,
-	    updated_at = now()
+		latest_saved_id = GREATEST(latest_saved_id, $2),
+		backfill_next_id = GREATEST(backfill_next_id, $3),
+		updated_at = now()
 	WHERE name = 'xkcd'
 `
 
@@ -148,6 +197,15 @@ func (s *Store) SaveComplete(
 	comic archive.Comic,
 	image archive.Image,
 	progress archive.Progress,
+) error {
+	return s.saveComplete(ctx, comic, image, &progress)
+}
+
+func (s *Store) saveComplete(
+	ctx context.Context,
+	comic archive.Comic,
+	image archive.Image,
+	progress *archive.Progress,
 ) error {
 	if len(image.Data) == 0 {
 		return fmt.Errorf("cannot save an empty image")
@@ -183,15 +241,20 @@ func (s *Store) SaveComplete(
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (id) DO UPDATE
 		SET title = EXCLUDED.title,
-		    safe_title = EXCLUDED.safe_title,
-		    alt = EXCLUDED.alt,
-		    published_date = EXCLUDED.published_date,
-		    upstream_image_url = EXCLUDED.upstream_image_url,
-		    metadata = EXCLUDED.metadata,
-		    metadata_fetched_at = now()
+			safe_title = EXCLUDED.safe_title,
+			alt = EXCLUDED.alt,
+			published_date = EXCLUDED.published_date,
+			upstream_image_url = EXCLUDED.upstream_image_url,
+			metadata = EXCLUDED.metadata,
+			metadata_fetched_at = now()
 	`,
-		comic.Num, comic.Title, comic.SafeTitle, comic.Alt,
-		published, comic.Img, []byte(metadata),
+		comic.Num,
+		comic.Title,
+		comic.SafeTitle,
+		comic.Alt,
+		published,
+		comic.Img,
+		[]byte(metadata),
 	); err != nil {
 		return err
 	}
@@ -203,13 +266,16 @@ func (s *Store) SaveComplete(
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (comic_id) DO UPDATE
 		SET content_type = EXCLUDED.content_type,
-		    byte_size = EXCLUDED.byte_size,
-		    sha256 = EXCLUDED.sha256,
-		    data = EXCLUDED.data,
-		    downloaded_at = now()
+			byte_size = EXCLUDED.byte_size,
+			sha256 = EXCLUDED.sha256,
+			data = EXCLUDED.data,
+			downloaded_at = now()
 	`,
-		comic.Num, image.ContentType, len(image.Data),
-		image.SHA256, image.Data,
+		comic.Num,
+		image.ContentType,
+		len(image.Data),
+		image.SHA256,
+		image.Data,
 	); err != nil {
 		return err
 	}
@@ -218,16 +284,29 @@ func (s *Store) SaveComplete(
 		INSERT INTO comic_fetches (comic_id, status)
 		VALUES ($1, 'complete')
 		ON CONFLICT (comic_id) DO UPDATE
-		SET status = 'complete', last_error = NULL
+		SET status = 'complete',
+			last_error = NULL,
+			next_retry_at = NULL
 	`, comic.Num); err != nil {
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, progressSQL,
-		progress.LatestSeenID,
-		progress.LatestSavedID,
-		progress.NextID,
-	); err != nil {
+	if progress != nil {
+		if _, err := tx.Exec(ctx, progressSQL,
+			progress.LatestSeenID,
+			progress.LatestSavedID,
+			progress.NextID,
+		); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE sync_state
+		SET latest_saved_id = GREATEST(latest_saved_id, $1),
+			updated_at = now()
+		WHERE name = 'xkcd'
+	`, comic.Num); err != nil {
 		return err
 	}
 
@@ -250,7 +329,9 @@ func (s *Store) SaveSkipped(
 		INSERT INTO comic_fetches (comic_id, status, last_error)
 		VALUES ($1, 'unavailable', $2)
 		ON CONFLICT (comic_id) DO UPDATE
-		SET status = 'unavailable', last_error = EXCLUDED.last_error
+		SET status = 'unavailable',
+			last_error = EXCLUDED.last_error,
+			next_retry_at = NULL
 	`, id, reason); err != nil {
 		return err
 	}
