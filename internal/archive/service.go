@@ -219,7 +219,14 @@ func (s *Service) RetryOne(ctx context.Context) error {
 		)
 	}
 
-	s.log.Warn("comic retry failed", "id", id, "error", err)
+	s.log.Warn(
+		"comic retry failed",
+		"id", id,
+		"error", err,
+		"context_error", ctx.Err(),
+		"context_cause", context.Cause(ctx),
+	)
+
 	return nil
 }
 
@@ -287,6 +294,8 @@ func (s *Service) queueBackfillFailure(
 		"backfill failure queued; continuing",
 		"id", id,
 		"error", cause,
+		"context_error", ctx.Err(),
+		"context_cause", context.Cause(ctx),
 	)
 
 	return nil
