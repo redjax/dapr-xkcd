@@ -27,6 +27,10 @@ type Service interface {
 	Status(ctx context.Context) (archive.Progress, error)
 }
 
+type retryService interface {
+	RetryOne(ctx context.Context) error
+}
+
 type Options struct {
 	Address          string
 	IngestionTimeout time.Duration
@@ -57,7 +61,6 @@ func NewServer(
 
 	staticRoot, err := fs.Sub(staticFiles, "static")
 	if err != nil {
-		// NewServer cannot return an error, so fail loudly during startup.
 		panic(fmt.Errorf("create embedded static filesystem: %w", err))
 	}
 
@@ -78,6 +81,11 @@ func NewServer(
 
 	mux.HandleFunc("/latest", api.job(service.CheckLatest))
 	mux.HandleFunc("/backfill", api.job(service.BackfillOne))
+
+	if retries, ok := service.(retryService); ok {
+		mux.HandleFunc("/retry", api.job(retries.RetryOne))
+	}
+
 	mux.HandleFunc("GET /comics/{id}", api.serveComic)
 	mux.HandleFunc("GET /comics/{id}/image", api.serveImage)
 	mux.HandleFunc("GET /sync/status", api.serveStatus)
