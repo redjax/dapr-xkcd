@@ -25,6 +25,11 @@ on:
         type: boolean
         default: false
 
+      notify_komodo:
+        description: Send Komodo webhook
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 
@@ -71,7 +76,7 @@ jobs:
             tags+=("${IMAGE}:latest")
           fi
 
-          ## A manually published version tag also gets its version image tag.
+          ## Manually published version tags also get a version image tag.
           if [[ "${publish}" == "true" \
              && "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/}"
@@ -97,7 +102,6 @@ jobs:
             printf '%s\n' "${tags[@]}"
             printf 'IMAGE_TAGS\n'
           } >> "${GITHUB_OUTPUT}"
-
 
           {
             printf '### Container build decision\n\n'
@@ -136,3 +140,151 @@ jobs:
       cache-to: type=gha,mode=max,scope=dapr-xkcd-api
       publish: ${{ needs.prepare.outputs.publish == 'true' }}
       registry: ghcr.io
+
+  deploy-komodo:
+    name: Notify Komodo
+    needs: [prepare, docker]
+    if: >-
+      ${{
+        needs.prepare.outputs.publish == 'true' &&
+        github.ref == 'refs/heads/main' &&
+        (
+          github.event_name == 'push' ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            inputs.notify_komodo == true
+          )
+        )
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Komodo deployment
+        id: notify
+        continue-on-error: true
+        shell: bash
+        env:
+          KOMODO_DEPLOY_WEBHOOK: ${{ secrets.KOMODO_WEBHOOK_URL }}
+          KOMODO_WEBHOOK_SECRET: ${{ secrets.KOMODO_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+
+          report_warning() {
+            local detail="$1"
+
+            echo "::warning::${detail}"
+
+            {
+              echo "result=warning"
+              echo "detail=${detail}"
+            } >> "${GITHUB_OUTPUT}"
+          }
+
+          if [[ -z "${KOMODO_DEPLOY_WEBHOOK}" \
+             || -z "${KOMODO_WEBHOOK_SECRET}" ]]; then
+            report_warning "Komodo webhook URL or secret is missing."
+            exit 1
+          fi
+
+          ## Construct a GitHub-style push payload.
+          #  The notification job only runs for published main builds.
+          payload="$(jq -cn \
+            --arg ref "${GITHUB_REF}" \
+            --arg after "${GITHUB_SHA}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg server_url "${GITHUB_SERVER_URL}" \
+            --arg actor "${GITHUB_ACTOR}" \
+            '{
+              ref: $ref,
+              after: $after,
+              deleted: false,
+              repository: {
+                name: ($repository | split("/") | last),
+                full_name: $repository,
+                html_url: ($server_url + "/" + $repository),
+                clone_url: ($server_url + "/" + $repository + ".git"),
+                default_branch: "main",
+                owner: {
+                  login: ($repository | split("/") | first),
+                  name: ($repository | split("/") | first)
+                }
+              },
+              pusher: {
+                name: $actor
+              }
+            }'
+          )"
+
+          ## Sign exactly the bytes that curl sends.
+          signature="sha256=$(printf '%s' "${payload}" \
+            | openssl dgst \
+                -sha256 \
+                -hmac "${KOMODO_WEBHOOK_SECRET}" \
+                -hex \
+            | awk '{print $NF}')"
+
+          delivery_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          response_file="$(mktemp)"
+          trap 'rm -f "${response_file}"' EXIT
+
+          if http_code="$(curl \
+            --silent \
+            --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --header 'X-GitHub-Event: push' \
+            --header "X-GitHub-Delivery: ${delivery_id}" \
+            --header "X-Hub-Signature-256: ${signature}" \
+            --data-binary "${payload}" \
+            "${KOMODO_DEPLOY_WEBHOOK}")"; then
+
+            if [[ "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
+              {
+                echo "result=success"
+                echo "detail=Komodo accepted the webhook (HTTP ${http_code})."
+              } >> "${GITHUB_OUTPUT}"
+
+              echo "Komodo accepted the deployment notification."
+              exit 0
+            fi
+
+            report_warning "Komodo webhook returned HTTP ${http_code}."
+            exit 1
+
+          else
+            report_warning "Komodo webhook request failed or timed out."
+            exit 1
+          fi
+
+      - name: Report notification result
+        if: always()
+        shell: bash
+        env:
+          RESULT: ${{ steps.notify.outputs.result }}
+          DETAIL: ${{ steps.notify.outputs.detail }}
+          STEP_OUTCOME: ${{ steps.notify.outcome }}
+        run: |
+          {
+            echo "### Komodo deployment notification"
+            echo
+
+            if [[ "${STEP_OUTCOME}" == "success" \
+               && "${RESULT}" == "success" ]]; then
+              echo "[SUCCESS] Webhook request accepted."
+              echo
+              echo "This confirms webhook acceptance, not deployment health."
+            else
+              echo "[WARNING] Notification was unsuccessful."
+              echo
+              echo "The published image is unaffected by this notification failure."
+            fi
+
+            echo
+            echo "- Details: ${DETAIL:-No response details available}"
+            echo "- Published commit: \`${GITHUB_SHA}\`"
+            echo "- Deployment image: \`ghcr.io/redjax/dapr-xkcd:latest\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
